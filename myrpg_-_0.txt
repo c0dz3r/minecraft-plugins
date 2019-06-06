@@ -1,0 +1,1354 @@
+#include <a_samp>
+#include <a_mysql>
+#include <dns>
+#include <streamer>
+#include <zcmd>
+#include <CTime>
+
+native WP_Hash(buffer[], len, const str[]);
+native sscanf(const sting[], const pattern[], {Float,_}:...);
+
+main() {
+	printf("MyRPG: Compilação 1 (0.1) por Stewie`\n \
+			\t Luís Gustavo Miki");
+	return 1;
+}
+
+#if defined MAX_PLAYERS
+	#undef MAX_PLAYERS
+#endif 
+
+// // // // // // // // // // // // // // // // // // //
+//   MyRPG é o nome do gamemode RPG 100% brasileiro   //
+//   codado totalmente do 0, para criar um novo 	  //
+//   [i]conceito[/i] de RPG, sendo as coisas mais	  //
+//   simples mais realístico possivel, apenas com 	  //
+//	 restrição de script, fazendo com que o mode	  //
+// 	 dê a vontade de tentar tudo.					  //
+// // // // // // // // // // // // // // // // // // //
+//
+// 	Creditos iniciais a:
+//      + Stewie` 	(Luís Gustavo Miki)
+//		+ BlueX 	(Gonçalo Rebelo)
+//		+ Viih 		(Victor Ferraresi)  
+//			
+//			- Apenas essas pessoas tem os direitos
+//			  para com o script.
+//			
+//
+//
+//
+//
+
+//
+//
+//
+//
+//
+
+//
+// ESSE GAMEMODE FOI FEITO DO 0 POR LUÍS GUSTAVO MIKI
+// POR INTEIRO. TUDO CONTINDO NESSE GAMEMODE E PROPRIEDADE
+// DE LUIS GUSTAVO MIKI.
+//
+// (Partes de outros autores serão mencionados ao decorrer do script)
+
+
+// Começo do script:
+
+// Constantes importantes
+
+new const 
+	SCRIPT_VERSION[] = "0.1 (Rev 0)",
+	SERVER_NAME[] = "RioRPG",
+	MAX_PLAYERS = 800,
+	
+	DB_HOSTNAME[] = "localhost",
+	DB_USER[] = "root",
+	DB_DB [] = "myrpg",
+	DB_PASS[] = "";
+	
+enum
+{
+	PLAYER_STAT_JUST_CONNECTED,
+	PLAYER_STAT_LOGGING,
+	PLAYER_STAT_REGISTER_PROCESS,
+	PLAYER_STAT_LOADING,
+	PLAYER_STAT_PLAYING,
+	PLAYER_STAT_AJAIL
+}
+
+enum 
+{
+	PLAYER_ATTRIB_CONFIRMED 	= 0b1,
+	PLAYER_ATTRIB_TRUSTED		= 0b10,
+	PLAYER_ATTRIB_VIP_BRONZE 	= 0b100,
+	PLAYER_ATTRIB_VIP_SILVER	= 0b1000,
+	PLAYER_ATTRIB_VIP_GOLD		= 0b10000,
+	
+	PLAYER_ATTRIB_SEMI_ADMIN	= 0b100000,
+	PLAYER_ATTRIB_ADMIM			= 0b1000000,
+	PLAYER_ATTRIB_LEAD_ADMIN	= 0b10000000,
+	PLAYER_ATTRIB_DEV			= 0b100000000,
+	PLAYER_ATTRIB_OWNER			= 0b1000000000
+}
+
+
+new Float:cDefaultPos[4] = {
+	1731.6230,-1276.0973,13.5610,117.5404	
+};
+
+// Estruturas de dados (enum)
+enum E_PLAYER_INFO {
+	// Identificação
+	gPlayerID,
+	gPlayerName[MAX_PLAYER_NAME], 
+	gPlayerIP[16],
+	gPlayerHost[256],
+	// Estática (para usar pra carregar dados
+	gPlayerReg_Pass[32],
+	gPlayerLogin_Tries,
+	// Variaveis (SCRIPT/aka OOC)
+	gPlayerStat,
+	gPlayerAttributes,
+	// Variaveis (GAME/ aka IC)
+	gPlayerSkin,
+	gPlayerLevel,
+	gPlayerExp,
+	gPlayerCash,
+	gPlayerMoney,
+	gPlayerPayCheck,
+	gPlayerSavings,
+	// Familias/Grupos
+	gPlayerFamily,
+	gPlayerFamilyRank,
+	gPlayerFamilyJoin,
+	gPlayerJob,
+	gPlayerJobRank,
+	gPlayerJobTime,
+	gPlayerSpawn,
+    // PROPERTY_SYSTEM
+    gPlayerInside,
+    gPlayerPorch
+}
+
+enum RCAMERA_INFO 
+{
+	Float:rcam_Pos[3],
+	Float:rcam_LookAt[3]
+}
+//
+
+// Declarações de variaveis globais
+new gPlayerInfo[800][E_PLAYER_INFO];
+
+new
+	//Language:g_lPortuguese,
+	g_dbConnection,
+	gstring[1024],
+	Text:g_tdStat;
+	
+new rcamInfo[][RCAMERA_INFO] = {
+	{{719.8196, -1984.5413, 0.8574	 }, {719.7933,  -1983.5378, 0.7499  }},
+	{{842.0169, -1772.2430, 365.1170 }, {841.0131,  -1772.2399, 362.0245}},
+	{{1085.8168, -1507.1821, 32.6435 }, {1086.4247, -1506.3833, 32.2360 }},
+	{{1138.8068, -1400.2664, 22.4200 }, {1139.8031, -1400.1439, 22.3171 }},
+	{{1532.3412, -1361.0857, 341.1450}, {1532.7753, -1361.9911, 339.6769}},
+	{{1518.8756, -1628.3341, 18.7397 }, {1519.3651, -1629.2109, 18.6616 }},
+	{{1834.7419, -1303.5442, 120.2275}, {1835.5393, -1304.1547, 119.9244}},
+	{{1935.7708, -1395.2288, 342.9268}, {1935.7756, -1394.2245, 341.1788}},
+	{{2200.1458, -1106.1829, 107.0125}, {2200.9858, -1105.6324, 106.6644}},
+	{{2571.9436, -1278.1204, 131.3794}, {2572.5393, -1278.9288, 130.8064}}
+	                                  
+};
+
+enum 
+{
+	PROPERTY_ATTRIB_ACTIVE = 0b1,
+	PROPERTY_ATTRIB_BUYABLE = 0b10,
+	PROPERTY_ATTRIB_SELLABLE = 0b100,
+	PROPERTY_ATTRIB_ENTERABLE = 0b1000,
+	PROPERTY_ATTRIB_EXITABLE   = 0b10000,
+	
+	//
+	// Static means if the property belongs to 
+	// a faction, instead of some player.
+	// Faction members would have access to
+	// the property.
+	PROPERTY_ATTRIB_STATIC 		= 0b100000	
+}
+enum
+{
+	PROPERTY_TYPE_INT = 0,
+	PROPERTY_TYPE_HOUSE = 1,
+	PROPERTY_TYPE_BUSINESS = 100,
+	PROPERTY_TYPE_BUSINESS_GROCERY,
+	PROPERTY_TYPE_BUSINESS_BANK,
+	PROPERTY_TYPE_BUSINESS_GAS,
+	PROPERTY_TYPE_BUSINESS_CASINO,
+	PROPERTY_TYPE_BUSINESS_WEAPON
+}
+
+enum PROPERTY_INFO
+{
+	bool:prop_Loaded,
+	prop_Attrib,
+	prop_Type,
+	prop_Level,
+	prop_Price,
+	Float:prop_ExtPos[3],
+	prop_ExtProp,
+	Float:prop_IntPos[3],
+	prop_IntInt,
+	prop_Owner,
+	prop_Locked,
+	prop_Name[32],
+	// --------- //
+	prop_AreaExt,
+	prop_AreaInt,
+	prop_PickupExt,
+	prop_PickupInt
+}
+#define MAX_PROPERTIES 1000
+new gPropertyInfo[MAX_PROPERTIES][PROPERTY_INFO];
+
+new const
+	sz_PropertyDump[] = {
+		"CREATE TABLE IF NOT EXISTS `familyinfo` ( \
+			`id` int(10) NOT NULL AUTO_INCREMENT, \
+			`name` varchar(50) NOT NULL, \
+			`rank1` varchar(50) NOT NULL, \
+			`rank2` varchar(50) NOT NULL, \
+			`rank3` varchar(50) NOT NULL, \
+			`rank4` varchar(50) NOT NULL, \
+			`rank5` varchar(50) NOT NULL, \
+			`rank6` varchar(50) NOT NULL, \
+			`drogas` int(11) NOT NULL, \
+			`materiais` int(11) NOT NULL, \
+			`x` double NOT NULL, \
+			`y` double NOT NULL, \
+			`z` double NOT NULL, \
+			PRIMARY KEY (`id`) )" };
+
+// Funções Públicas (SA:MP)
+//
+//
+
+public OnGameModeInit()
+{
+	g_dbConnection = Server_dbConnect();
+	
+	g_tdStat = TextDrawCreate(319.000000, 435.000000, "  ");
+	TextDrawAlignment(g_tdStat, 2);
+	TextDrawBackgroundColor(g_tdStat, -256);
+	TextDrawFont(g_tdStat, 1);
+	TextDrawLetterSize(g_tdStat, 0.300000, 1.200000);
+	TextDrawColor(g_tdStat, -1);
+	TextDrawSetOutline(g_tdStat, 1);
+	TextDrawSetProportional(g_tdStat, 1);
+	
+	Property_LoadAll();
+	
+	return 1;
+}
+
+public OnPlayerConnect(playerid)
+{
+	TogglePlayerSpectating(playerid, true);
+    SetPlayerColor(playerid, -1);
+	Player_Init(playerid);
+	gPlayerInfo[playerid][gPlayerStat] = PLAYER_STAT_JUST_CONNECTED;
+	SendClientMessageFormatted(playerid, -1, "Olá, %s. Bem-vindo ao {FF7F50}%s{/}.",
+        gPlayerInfo[playerid][gPlayerName],
+        SERVER_NAME
+    );
+    SendClientMessageFormatted(playerid, -1, "Esse servidor usa o script {FF7F50}MyRPG{FFFFFF} versão {FF7F50}%s.", SCRIPT_VERSION);
+    SendClientMessage(playerid, -1, "Creditos para {FF7F50}Stewie{FFFFFF}`, {FF7F50}BlueX{FFFFFF} e {FF7F50}Viih{FFFFFF}.");
+
+	return 1;
+}
+
+public OnReverseDNS(ip[], host[], extra)
+	format(gPlayerInfo[extra][gPlayerHost], 256, host);
+
+	
+enum 
+{
+	DIALOG_NONE,
+	DIALOG_REGISTER_1,
+	DIALOG_REGISTER_1_CONF,
+	DIALOG_REGISTER_1_ERR,
+	DIALOG_REGISTER_2,
+	DIALOG_EMAIL_YESNO,
+	DIALOG_EMAIL_INPUT,
+	DIALOG_LOGIN,
+	DIALOG_INVENT
+}
+
+public OnDialogResponse(playerid, dialogid, response, listitem, inputtext[])
+{
+	switch	(dialogid)
+	{
+		case
+			DIALOG_REGISTER_1:
+		{
+			if(response)
+			{
+				if(4 <= strlen(inputtext) < 32)
+				{
+					format(gPlayerInfo[playerid][gPlayerReg_Pass], 32, "%s", inputtext);
+					ShowPlayerDialog(playerid, DIALOG_REGISTER_2, DIALOG_STYLE_PASSWORD, "Passo 2 de 4:", "Digite novamente a senha para confirmar:", "OK", "Voltar");
+				}
+				else
+				{
+					ShowPlayerDialog(playerid, DIALOG_REGISTER_1_ERR, DIALOG_STYLE_MSGBOX, "Erro:", "A sua senha deve ter de 4 a 32 caracteres!", "OK", "");
+				}
+			}
+			else
+			{
+				ShowPlayerDialog
+					(playerid, DIALOG_REGISTER_1_CONF, DIALOG_STYLE_MSGBOX, "Confirmação", "Você deseja mesmo cancelar?\nSe sim, será obrigado a sair do servidor!", "Sim", "Não");
+			}
+		}
+
+		case
+			DIALOG_REGISTER_1_CONF:
+		{
+			if(response)
+			{
+				ShowPlayerDialog
+					(playerid, DIALOG_NONE, DIALOG_STYLE_MSGBOX, "Adeus!", "Volte sempre!", "Fechar", "");
+				Kick(playerid);
+			}
+			else
+			{
+				ShowPlayerDialog
+					(playerid, DIALOG_REGISTER_1, DIALOG_STYLE_PASSWORD, "Passo 1 de 4:", "Olá e bem-vindo ao processo de\nimigração para o nosso servidor!\n\tDigite sua senha para próximos logins:", "OK", "Cancelar");
+                SendClientMessage(playerid, -1, "{FF7F50}(( {FFFFFF}Digite abaixo a senha para o seu novo personagem.{FF7F50} ))");
+			}
+		}
+		//break;
+		case
+			DIALOG_REGISTER_1_ERR:
+		{
+			ShowPlayerDialog
+				(playerid, DIALOG_REGISTER_1, DIALOG_STYLE_PASSWORD, "Passo 1 de 4:", "Olá e bem-vindo ao processo de\nimigração para o nosso servidor!\n\tDigite sua senha para próximos logins:", "OK", "Cancelar");
+		}
+		//break;
+		case
+			DIALOG_REGISTER_2:
+		{
+			if(response)
+			{
+				//printf("inputtext: %s | gPlayerReg_Pass: %s", inputtext, gPlayerInfo[playerid][gPlayerReg_Pass]);
+				if(strcmp(inputtext, gPlayerInfo[playerid][gPlayerReg_Pass], false))
+				{
+					ShowPlayerDialog(playerid, DIALOG_REGISTER_1_ERR, DIALOG_STYLE_MSGBOX, "Erro:", "A senha que você digitou é diferente da confirmação.", "OK", "");
+				}
+				else
+				{
+					ShowPlayerDialog(playerid, DIALOG_EMAIL_YESNO, DIALOG_STYLE_MSGBOX, "Confirmação de e-mail.", "Você deseja inserir um e-mail para confirmação?\nConfirmando um e-mail você tem:\n\t- Um rank de 'usuário confirmado' \
+		ingame.\n\t- Vantagens no jogo, como carros exclusivos, propriedades, etc.\n\t- Mais chances de entrar na staff e\n\t- Receber updates sobre a nossa comunidade.\n\nDeseja inserir um e-mail?", "Sim", "Não");
+				}
+			}
+			else
+			{
+				ShowPlayerDialog
+					(playerid, DIALOG_REGISTER_1, DIALOG_STYLE_PASSWORD, "Passo 1 de 4:", "Olá e bem-vindo ao processo de\nimigração para o nosso servidor!\n\tDigite sua senha para próximos logins:", "OK", "Cancelar");
+			}
+		}
+		//break;
+		case
+			DIALOG_EMAIL_YESNO:
+		{
+            const bool:enabled = false;
+			if(response && enabled)
+			{
+                SendClientMessage(playerid, -1, "{FF7F50}(( {FFFFFF}Certo. Você vai registrar o seu e-mail. {FF7F50} ))");
+				ShowPlayerDialog(playerid, DIALOG_EMAIL_INPUT, DIALOG_STYLE_INPUT, "Passo 3 de 4:", "Agora digite o seu e-mail!", "OK", "Cancelar");
+			}
+			else
+			{
+				ShowPlayerDialog(playerid, DIALOG_NONE, DIALOG_STYLE_MSGBOX, "Processando...", "Aguarde enquanto a sua conta é criada\ne você é levado para o mundo...", "", "");
+				
+				WP_Hash(gstring, 129, gPlayerInfo[playerid][gPlayerReg_Pass]);
+				mysql_format(g_dbConnection, gstring, 
+					"INSERT INTO `player_info` (`name`, `password`) VALUES ('%s', '%s');", gPlayerInfo[playerid][gPlayerName], gstring);
+				mysql_function_query(g_dbConnection, gstring, false, "r@Player_Register", "is", playerid, gPlayerInfo[playerid][gPlayerReg_Pass]);
+			}
+		}
+		case
+			DIALOG_LOGIN:
+		{
+			mysql_format(g_dbConnection, gstring, "SELECT `password` FROM `player_info` WHERE name='%s'", gPlayerInfo[playerid][gPlayerName]);
+			mysql_function_query(g_dbConnection, gstring, true, "r@Player_Login", "is", playerid, inputtext);
+		}
+		//break;
+		
+		
+		
+		/* --------------
+		 * ITEM ---------
+		*/
+		case
+			DIALOG_INVENT:
+		{
+			
+		}
+	}
+	return 1;
+}
+
+public OnPlayerText(playerid, text[])
+{
+    if(text[0] == '!')
+    {
+        strmid(gstring, text, 1, strlen(text));
+        format(gstring, sizeof gstring, "/a %s", gstring);
+        CallLocalFunction("OnPlayerCommandText", "is", playerid, gstring);
+        return 1;
+    }
+
+    // Use this to prevent SAMP Server to broadcast the text
+    return 0;
+}
+
+public OnPlayerEnterDynamicArea(playerid, areaid)
+{
+	new index = -1;
+	while(++index < MAX_PROPERTIES)
+	{
+		//
+		// This was supposed to be a pointer to the array (lol)
+		// Just keep an eye out for silly mistakes
+		#define _prp gPropertyInfo[index]
+		
+		// In the case the current property exterior dynarea 
+		// matches with the current areaid 
+		// The same with the other statement down there :)
+		if(_prp[prop_AreaExt] == areaid)
+		{
+            gPlayerInfo[playerid][gPlayerPorch] = index;
+			if(Player_IsAdmin(playerid))
+				Property_DisplayData(playerid, index);
+			// If the property the player is trying to enter
+			// Is actually active
+			if(_prp[prop_Attrib] & PROPERTY_ATTRIB_ACTIVE)
+			{
+				// If the property has an owner
+				if(_prp[prop_Owner])
+				{
+					Property_SendDoorMessage(playerid, index);
+				}
+				// Else case...
+				else
+				{
+					// If buying the house is allowed
+					// So, summing:
+					// If the player can buy such prop
+					if(_prp[prop_Attrib] & PROPERTY_ATTRIB_BUYABLE)
+					{
+						// If the player has enough level to buy the house
+						if(gPlayerInfo[playerid][gPlayerLevel] >= _prp[prop_Level])
+						{
+							SendClientMessage(playerid, -1, "Esta casa está à {0EAB00}venda{FFFFFF}!");
+							format(gstring, sizeof gstring, 
+								"Preço: {0EAB00}R${FFFFFF}%d,00 / Nível mínimo: {0006AB}%d", _prp[prop_Price], _prp[prop_Level]);
+							SendClientMessage(playerid, -1, gstring);	
+							SendClientMessage(playerid, -1, "    - Para opções, digite {2DD2F7}/prop(riedade){FFFFFF}.");
+						}
+						else
+						{
+							SendClientMessage(playerid, -1, "Esta casa está à {0EAB00}venda{FFFFFF}!");
+							format(gstring, sizeof gstring, 
+								"Preço: {0EAB00}R${FFFFFF}%d,00 / Nível mínimo: {0006AB}%d", _prp[prop_Price], _prp[prop_Level]);
+							SendClientMessage(playerid, -1, gstring);	
+							SendClientMessage(playerid, -1, "    - Infelizmente você não pode comprar esta propriedade...");
+						}
+					}
+					// If the house buying is currently disabled
+					else
+					{
+						SendClientMessage(playerid, -1, "{DE2F4F}(( {FFFFFF}A compra desta propriedade está desabilitada. {DE2F4F}))");
+					}
+				}
+			}
+			// Else case, let's advise the player :D
+			else
+			{
+				SendClientMessage(playerid, -1, "{DE2F4F}(( {FFFFFF}Esta propriedade está atualmente desativada. {DE2F4F} ))");
+			}
+			return 1;
+		}
+		if(_prp[prop_AreaInt] == areaid)
+		{
+			return 1;
+		}
+		#undef _prp
+	}
+	return 1;
+}
+public OnPlayerLeaveDynamicArea(playerid, areaid)
+{
+    if(gPropertyInfo
+        [gPlayerInfo[playerid][gPlayerPorch]]
+        [prop_AreaInt]  == areaid ||
+       gPropertyInfo
+        [gPlayerInfo[playerid][gPlayerPorch]]
+        [prop_AreaExt]  == areaid ) {
+        gPlayerInfo[playerid][gPlayerPorch] = 0;
+    }
+    return 1;
+}
+
+// Funções Públicas (Script)
+//
+//
+
+// Server:
+	forward Server_dbConnect();
+	
+	
+public Server_dbConnect()
+{
+	new conn;
+	conn = mysql_connect(DB_HOSTNAME, DB_USER, DB_DB, DB_PASS);
+	
+	if(!conn)
+	{
+		printf("Failure on Server_dbConnect(), shutting down...");
+		SendRconCommand("exit");
+		return 0;
+	}
+	printf("(!) Database connection has succeded!\ng_dbConnection = %d", conn);
+	return conn;
+}
+
+// Player:
+	forward Player_Init(playerid);
+		forward r@Player_Init(playerid);
+	forward Player_Load(playerid);
+		forward r@Player_Load(playerid);
+    forward Player_BanCheck(playerid);
+        forward r@Player_BanCheck(playerid);
+	forward Player_Spawn(playerid);
+		forward r@Player_Register(playerid, password[]);
+		forward r@Player_Login(playerid, password[]);
+	stock Player_SetStatLabel(playerid, text[]);
+		
+	
+	
+public Player_Init(playerid)
+{
+	Player_SetStatLabel(playerid, "Obtendo dados do cliente...");
+	GetPlayerName(playerid, gPlayerInfo[playerid][gPlayerName], MAX_PLAYER_NAME);
+	GetPlayerIp(playerid, gPlayerInfo[playerid][gPlayerIP], 16);
+	rdns(gPlayerInfo[playerid][gPlayerIP], playerid);
+	
+	Player_SetStatLabel(playerid, "Limpando variaveis da sessão anterior...");
+	gPlayerInfo[playerid][gPlayerLogin_Tries] = 0;
+	
+	Player_SetStatLabel(playerid, "Verificando a existencia da conta...");
+	mysql_format(g_dbConnection, gstring, "SELECT `id` FROM `player_info` WHERE `name`='%e'", gPlayerInfo[playerid][gPlayerName]);
+	mysql_function_query(g_dbConnection, gstring, true, "r@Player_Init", "i", playerid);
+	return 1;
+}
+public r@Player_Init(playerid)
+{
+	Player_SetStatLabel(playerid, "Dados obtidos, processando...");
+	new fields, rows;
+	cache_get_data(rows, fields, g_dbConnection);
+	
+	if(!rows)
+	{
+		Player_SetStatLabel(playerid, "Conta inexistente!");
+		gPlayerInfo[playerid][gPlayerStat] = PLAYER_STAT_REGISTER_PROCESS;
+        SendClientMessageFormatted(playerid, -1, "Senhor {FF7F50}%s{FFFFFF}. Parece que é a sua primeira visita aqui, não?",
+            gPlayerInfo[playerid][gPlayerName]);
+        SendClientMessage(playerid, -1, "Por favor, siga com os próximos passos para obter {FF7F50}visto{FFFFFF} em nosso servidor!");
+		
+		Player_SetStatLabel(playerid, "Passo 1 de 4");
+		ShowPlayerDialog(playerid, DIALOG_REGISTER_1, DIALOG_STYLE_PASSWORD, "Passo 1 de 4:", "Olá e bem-vindo ao processo de\nimigração para o nosso servidor!\n\tDigite sua senha para próximos logins:", "OK", "Cancelar");
+        SendClientMessage(playerid, -1, "{FF7F50}(( {FFFFFF}Digite abaixo a senha para o seu novo personagem.{FF7F50} ))");
+		return 1;
+	}
+	
+	Player_SetStatLabel(playerid, "Prossiga com o login:");
+	gPlayerInfo[playerid][gPlayerStat] = PLAYER_STAT_LOGGING;
+	ShowPlayerDialog(playerid, DIALOG_LOGIN, DIALOG_STYLE_PASSWORD, "Login no RioRPG:", "Para efetuar o login no nosso servidor,\ndigite a sua senha abaixo.", "Login", "");
+
+    SendClientMessageFormatted(playerid, -1, "Olá denovo, %s. Se deseja fazer o login, digite logo abaixo a sua senha!",
+        gPlayerInfo[playerid][gPlayerName]
+    );
+	return 1;
+	
+}
+public Player_Load(playerid)
+{
+	Player_SetStatLabel(playerid, "Preparando para carregar...");
+	gPlayerInfo[playerid][gPlayerStat] = PLAYER_STAT_LOADING;
+	format(gstring, sizeof gstring, "SELECT * FROM `player_info` WHERE `name`='%s'", gPlayerInfo[playerid][gPlayerName]);
+	mysql_function_query(g_dbConnection, gstring, true, "r@Player_Load", "i", playerid);
+	return 1;
+}
+public r@Player_Load(playerid)
+{
+	Player_SetStatLabel(playerid, "Processando dados...");
+	new rows, fields;
+	cache_get_data(rows, fields);
+
+	new buffer[32];
+	cache_get_field_content(0, "id", 		buffer, g_dbConnection);
+	gPlayerInfo[playerid][gPlayerID] = strval(buffer);
+	cache_get_field_content(0, "attrib", 		buffer, g_dbConnection);
+	gPlayerInfo[playerid][gPlayerAttributes] = strval(buffer);
+	cache_get_field_content(0, "level", 		buffer, g_dbConnection);
+	gPlayerInfo[playerid][gPlayerLevel] = 		strval(buffer);
+	cache_get_field_content(0, "exp", 			buffer, g_dbConnection);
+	gPlayerInfo[playerid][gPlayerExp] = 		strval(buffer);
+	cache_get_field_content(0, "cash", 			buffer, g_dbConnection);
+	gPlayerInfo[playerid][gPlayerCash] = 		strval(buffer);
+	cache_get_field_content(0, "money", 		buffer, g_dbConnection);
+	gPlayerInfo[playerid][gPlayerMoney] = 		strval(buffer);
+	cache_get_field_content(0, "paycheck", 		buffer, g_dbConnection);
+	gPlayerInfo[playerid][gPlayerPayCheck] = 	strval(buffer);
+	cache_get_field_content(0, "savings", 		buffer, g_dbConnection);
+	gPlayerInfo[playerid][gPlayerSavings] = 	strval(buffer);
+	cache_get_field_content(0, "family", 		buffer, g_dbConnection);
+	gPlayerInfo[playerid][gPlayerFamily] = 		strval(buffer);
+	cache_get_field_content(0, "familyrank", 	buffer, g_dbConnection);
+	gPlayerInfo[playerid][gPlayerFamilyRank] = 	strval(buffer);
+	cache_get_field_content(0, "familyjoin", 	buffer, g_dbConnection);
+	gPlayerInfo[playerid][gPlayerFamilyJoin] = 	strval(buffer);
+	cache_get_field_content(0, "job", 			buffer, g_dbConnection);
+	gPlayerInfo[playerid][gPlayerJob] = 		strval(buffer);
+	cache_get_field_content(0, "jobrank", 		buffer, g_dbConnection);
+	gPlayerInfo[playerid][gPlayerJobRank] = 	strval(buffer);
+	cache_get_field_content(0, "jobtime", 		buffer, g_dbConnection);
+	gPlayerInfo[playerid][gPlayerJobTime] = 	strval(buffer);
+	cache_get_field_content(0, "spawn", 		buffer, g_dbConnection);
+	gPlayerInfo[playerid][gPlayerSpawn] = 		strval(buffer);
+	cache_get_field_content(0, "skin", 		buffer, g_dbConnection);
+	gPlayerInfo[playerid][gPlayerSkin] = 		strval(buffer);
+	
+	Player_SetStatLabel(playerid, "Verificando bans...");
+    Player_BanCheck(playerid);
+	return 1;
+}
+
+enum
+{
+    RECORD_TYPE_COMMENT,
+    RECORD_TYPE_BAN,
+    RECORD_TYPE_KICK,
+    RECORD_TYPE_AJAIL
+}
+public Player_BanCheck(playerid)
+{
+    format(gstring, sizeof gstring, "SELECT `record_info`.*, `player_info`.`name` AS adminname FROM `record_info` INNER JOIN `player_info` ON `record_info`.`admin` = `player_info`.`id` WHERE `record_info`.`lifted`=0 AND `record_info`.`type`=1 AND (`record_info`.`stamp`+`record_info`.`time` < UNIX_TIMESTAMP() OR `record_info`.`time`=-1) AND `record_info`.`pid`=%d", gPlayerInfo[playerid][gPlayerID]);
+    mysql_function_query(g_dbConnection, gstring, true, "r@Player_BanCheck", "i", playerid);
+    return 1;
+}
+
+public r@Player_BanCheck(playerid)
+{
+    new rows, fields;
+    cache_get_data(rows, fields, g_dbConnection);
+
+    if(rows)
+    { // Vish. Sujou pros irmão :P
+        SendClientMessage(playerid, -1, " ");
+        SendClientMessage(playerid, -1, " ");
+        SendClientMessage(playerid, -1, "Você tem os seguintes bans (não expirados/eternos) adicionados a você:");
+
+        new index = -1;
+        while(++index < rows)
+        {
+            enum RI_RESULT_INFO
+            {
+                _ri_id,
+                _ri_pid,
+                _ri_type,
+                _ri_stamp,
+                _ri_reason[255],
+                _ri_time,
+                _ri_admin,
+                _ri_lifted,
+                _ri_liftadmin,
+                _ri_liftreason[255],
+                _ri_adminname[MAX_PLAYER_NAME]
+            }
+            new result[RI_RESULT_INFO],
+                buffer[64];
+
+            cache_get_field_content(index, "id", buffer, g_dbConnection);
+            result[_ri_id] = strval(buffer);
+            cache_get_field_content(index, "pid", buffer, g_dbConnection);
+            result[_ri_pid] = strval(buffer);
+            cache_get_field_content(index, "type", buffer, g_dbConnection);
+            result[_ri_type] = strval(buffer);
+            cache_get_field_content(index, "stamp", buffer, g_dbConnection);
+            result[_ri_stamp] = strval(buffer);
+            cache_get_field_content(index, "reason", result[_ri_reason], g_dbConnection);
+            cache_get_field_content(index, "time", buffer, g_dbConnection);
+            result[_ri_time] = strval(buffer);
+            cache_get_field_content(index, "admin", buffer, g_dbConnection);
+            result[_ri_admin] = strval(buffer);
+            cache_get_field_content(index, "lifted", buffer, g_dbConnection);
+            result[_ri_lifted] = strval(buffer);
+            cache_get_field_content(index, "liftadmin", buffer, g_dbConnection);
+            result[_ri_liftadmin] = strval(buffer);
+            cache_get_field_content(index, "liftreason", result[_ri_liftreason], g_dbConnection);
+            cache_get_field_content(index, "adminname", result[_ri_adminname], g_dbConnection);
+
+            new
+                tm<tmTime>;
+            localtime(Time:result[_ri_stamp], tmTime);
+            strftime(buffer, sizeof buffer, "%A, %d de %B de %Y (%X)", tmTime);
+
+            format(gstring, sizeof gstring, " - {C0C0C0}%s, {FFFFFF}pelo administrador {C0C0C0}%s:", buffer, result[_ri_adminname]);
+            SendClientMessage(playerid, -1, gstring);
+            format(gstring, sizeof gstring, "   {C0C0C0}Motivo: {FFFFFF}%s", result[_ri_reason]);
+            SendClientMessage(playerid, -1, gstring);
+
+            buffer[0] = 0;
+            strcat(buffer, "Nunca");
+            if(result[_ri_time] != -1)
+            {
+                localtime(Time:result[_ri_stamp] + Time:result[_ri_time], tmTime);
+                strftime(buffer, sizeof buffer, "%A, %d de %B de %Y (%X)", tmTime);
+            }
+            format(gstring, sizeof gstring, "   {C0C0C0}Expira em: {FFFFFF}%s", buffer);
+            SendClientMessage(playerid, -1, gstring);
+
+
+
+
+        }
+        Kick(playerid);
+        return 1;
+    }
+
+    Player_SetStatLabel(playerid, "Feito! Voce está sendo levado ao mundo!");
+	Player_Spawn(playerid);
+    return 1;
+}
+
+
+public r@Player_Register(playerid, password[])
+{
+	SendClientMessageFormatted(playerid, -1, "Senhor {2ADFE8}%s{FFFFFF}. Você foi autorizado com sucesso em nossa cidade.", gPlayerInfo[playerid][gPlayerName]);
+	SendClientMessage(playerid, -1, "Deseja que eu te guie numa pequena volta na nossa cidade?");
+	SendClientMessage(playerid, -1, "{2A6DE8}(( {FFFFFF}Lembrando que você pode ver o tutorial quando você quiser, digitando /tutorial{2A6DE8} ))");
+    SendClientMessageFormatted(playerid, -1, "(( {WHITE}Sua senha é %s. Se você registrou seu e-mail, uma cópia foi mandada para o mesmo.{/} ))",
+        password
+    );
+	
+	mysql_store_result(g_dbConnection);
+	new insert = mysql_insert_id(g_dbConnection);
+	mysql_free_result(g_dbConnection);
+
+    SendClientMessageFormatted(playerid, -1, "Você se registrou como {1E90FF}%q{FFFFFF}.", gPlayerInfo[playerid][gPlayerName]);
+    SendClientMessageFormatted(playerid, -1, "Você pode ter suporte mais rápido fornecendo o seu número a um administrador, que no caso é {C0C0C0}%d{FFFFFF}.", insert);
+
+    SendClientMessage(playerid, -1, "     - Para obter informações gerais sobre você e o servidor, digite {C0C0C0}/info{FFFFFF}.");
+    SendClientMessage(playerid, -1, "     - Para verificar seus documentos, digite {C0C0C0}/inventário{FFFFFF} (Serve também para outros itens).");
+    SendClientMessage(playerid, -1, "{C0C0C0}Se perder sua Identidade, você pode tirar uma cópia em uma delegacia local...");
+    SendClientMessage(playerid, -1, "Não exite em procurar por uma administrador para obter ajuda! Para informações gerais, novamente, digite {C0C0C0}/info{FFFFFF}");
+	Player_Load(playerid);
+	return 1;
+}
+
+public r@Player_Login(playerid, password[])
+{
+	new
+		hash_pass[129];
+	WP_Hash(hash_pass, sizeof hash_pass, password);
+	cache_get_field_content(0, "password", gstring, g_dbConnection);
+	
+	new result = strcmp(hash_pass, gstring, true);
+	
+	
+	
+	if(!result)
+	{
+        SendClientMessage(playerid, -1, "{FF7F50}(( {FFFFFF}Aguarde enquanto você é carregado e levado ao mundo...{FF7F50} ))");
+		Player_SetStatLabel(playerid, "Carregando!");
+		Player_Load(playerid);
+	}
+	else
+	{
+		if(gPlayerInfo[playerid][gPlayerLogin_Tries] == 3)
+		{
+			SendClientMessage(playerid, -1, "Você foi {E01B35}despejado{FFFFFF} por exceder as tentativas máximas de login!");
+			Kick(playerid);
+		}
+		else
+		{
+			gPlayerInfo[playerid][gPlayerLogin_Tries] ++;
+			ShowPlayerDialog(playerid, DIALOG_LOGIN, DIALOG_STYLE_PASSWORD, "Login no RioRPG:", "\tSenha errada!\nPara efetuar o login no nosso servidor,\ndigite a sua senha abaixo.", "Login", "");
+		}
+	}
+	return 1;
+}
+
+public Player_Spawn(playerid)
+{
+	if(!gPlayerInfo[playerid][gPlayerSpawn])
+		SetSpawnInfo(playerid, 0, gPlayerInfo[playerid][gPlayerSkin], cDefaultPos[0], cDefaultPos[1], cDefaultPos[2], cDefaultPos[3], 0, 0, 0, 0, 0, 0);
+	else
+	{
+		//
+	}
+	TogglePlayerSpectating(playerid, false);
+	gPlayerInfo[playerid][gPlayerStat] = PLAYER_STAT_PLAYING;
+	SpawnPlayer(playerid);
+	Player_SetStatLabel(playerid, "  ");
+	return 1;
+}
+
+stock Player_SetStatLabel(playerid, text[])
+{
+	TextDrawSetString(g_tdStat, text);
+	TextDrawShowForPlayer(playerid, g_tdStat);
+	return 1;
+}
+
+
+
+
+
+
+
+
+/* Item System */
+enum ITEM_INFO
+{
+	gItemName[64],
+	gItemType,
+	Float:gItemExtra
+}
+
+enum
+{
+	ITEM_TYPE_ID,
+	ITEM_TYPE_CASH
+}
+
+new const
+	gItemInfo[][ITEM_INFO] = {
+		{"Identidade", ITEM_TYPE_ID, 0.0},
+		{"Dinheiro", ITEM_TYPE_CASH, 0.0}
+	};
+
+/* PLAYER INVENT */
+#define MAX_ITEMS_PER_PAGE 10
+forward Invent_Show(playerid); //
+forward r@Invent_Show(playerid);
+
+CMD:inventario(playerid, params[], help)
+{
+	#pragma unused params
+	#pragma unused help
+	if(gPlayerInfo[playerid][gPlayerStat] != PLAYER_STAT_PLAYING)
+	{
+		return 1;
+	}
+	Invent_Show(playerid);
+	return 1;
+}
+
+public Invent_Show(playerid) 
+{
+	if(gPlayerInfo[playerid][gPlayerStat] < PLAYER_STAT_PLAYING)
+		return 1;
+	
+	format(gstring, sizeof gstring, "SELECT * FROM `inventory_info` WHERE `pid`=%d", gPlayerInfo[playerid][gPlayerID]);
+	mysql_function_query(g_dbConnection, gstring, true, "r@Invent_Show", "i", playerid);
+	return 1;
+}
+
+public r@Invent_Show(playerid)
+{
+	new rows, fields;
+	cache_get_data(rows, fields, g_dbConnection);
+	
+	gstring[0] = 0;
+	new temp[64], title[64];
+	format(title, sizeof title, "Inventário (%s):", gPlayerInfo[playerid][gPlayerName]);
+	
+	//declare gstring[];
+	for(new i; i < rows; i++)
+	{
+		new
+			item;
+		cache_get_field_content(i, "item", temp, g_dbConnection);
+		item = strval(temp);
+		
+		format(temp, sizeof temp, "[%d] - %s\n", i, gItemInfo[item][gItemName]);
+		strcat(gstring, temp);
+	}
+	ShowPlayerDialog(playerid, DIALOG_INVENT, DIALOG_STYLE_LIST, title, gstring, "Selecionar", "Sair");
+	return 1;
+}
+
+
+//
+//
+//
+// PROPERTY SYSTEM
+//
+forward Property_LoadAll();
+	forward r@Property_LoadAll();
+forward Property_SetAll();
+
+public Property_LoadAll()
+{
+	static block;	
+	if(block)
+		return 1;
+	block = 1;
+	
+	printf("Preparando para carregar as propriedades...");
+	
+	mysql_function_query(g_dbConnection, "SELECT * FROM `property_info`", true, "r@Property_LoadAll", ""); 
+	return 1;
+}
+
+public r@Property_LoadAll()
+{
+	new rows, fields, index = -1;
+	cache_get_data(rows, fields, g_dbConnection);
+	
+	while(++index < rows)
+	{
+		new buffer[32], id;
+		cache_get_field_content(index, "id", buffer, g_dbConnection);
+		id = strval(buffer);
+		
+		if(id >= MAX_PROPERTIES)
+			continue;
+		
+		// General Info
+		cache_get_field_content(index, "attrib", buffer, g_dbConnection);
+		gPropertyInfo[id][prop_Attrib] = strval(buffer);
+		cache_get_field_content(index, "type", buffer, g_dbConnection);
+		gPropertyInfo[id][prop_Type] = strval(buffer);
+		cache_get_field_content(index, "level", buffer, g_dbConnection);
+		gPropertyInfo[id][prop_Level] = strval(buffer);
+		cache_get_field_content(index, "price", buffer, g_dbConnection);
+		gPropertyInfo[id][prop_Price] = strval(buffer);
+		
+		// Position Info
+		//
+		// ext_
+		cache_get_field_content(index, "ext_x", buffer, g_dbConnection);
+		gPropertyInfo[id][prop_ExtPos][0] = floatstr(buffer);
+		cache_get_field_content(index, "ext_y", buffer, g_dbConnection);
+		gPropertyInfo[id][prop_ExtPos][1] = floatstr(buffer);
+		cache_get_field_content(index, "ext_z", buffer, g_dbConnection);
+		gPropertyInfo[id][prop_ExtPos][2] = floatstr(buffer);
+		cache_get_field_content(index, "ext_prop", buffer, g_dbConnection);
+		gPropertyInfo[id][prop_ExtProp] = strval(buffer);
+		
+		//
+		// int_
+		cache_get_field_content(index, "int_x", buffer, g_dbConnection);
+		gPropertyInfo[id][prop_IntPos][0] = floatstr(buffer);
+		cache_get_field_content(index, "int_y", buffer, g_dbConnection);
+		gPropertyInfo[id][prop_IntPos][1] = floatstr(buffer);
+		cache_get_field_content(index, "int_z", buffer, g_dbConnection);
+		gPropertyInfo[id][prop_IntPos][2] = floatstr(buffer);
+		cache_get_field_content(index, "int_int", buffer, g_dbConnection);
+		gPropertyInfo[id][prop_IntInt] = strval(buffer);
+		
+		//
+		// Game Info
+		cache_get_field_content(index, "owner", buffer, g_dbConnection);
+		gPropertyInfo[id][prop_Owner] = strval(buffer);
+		cache_get_field_content(index, "locked", buffer, g_dbConnection);
+		gPropertyInfo[id][prop_Locked] = strval(buffer);
+		cache_get_field_content(index, "name", gPropertyInfo[id][prop_Name], g_dbConnection);
+		
+		gPropertyInfo[id][prop_Loaded] = true;
+		
+		printf("-- PROP: %d CARREGADA: ex: %.2f | ey: %.2f | ez %.2f", id, gPropertyInfo[id][prop_ExtPos][0], gPropertyInfo[id][prop_ExtPos][1], gPropertyInfo[id][prop_ExtPos][2]);
+	}
+	Property_SetAll();
+	return 1;
+}
+
+public Property_SetAll()
+{
+	static block;	
+	if(block)
+		return 1;
+	block = 1;
+	
+	new index = -1;
+	while(++index < MAX_PROPERTIES)
+		if(gPropertyInfo[index][prop_Loaded])
+		{
+			if(gPropertyInfo[index][prop_Attrib] & PROPERTY_ATTRIB_ENTERABLE)
+			{
+				printf("PROP %d ENTERABLE!", index);
+				gPropertyInfo[index][prop_AreaExt] = CreateDynamicSphere(gPropertyInfo[index][prop_ExtPos][0], gPropertyInfo[index][prop_ExtPos][1], gPropertyInfo[index][prop_ExtPos][2], 2.0, gPropertyInfo[index][prop_ExtProp], gPropertyInfo[gPropertyInfo[index][prop_ExtProp]][prop_IntInt]);
+				gPropertyInfo[index][prop_PickupExt] = CreateDynamicPickup(1318, 1, gPropertyInfo[index][prop_ExtPos][0], gPropertyInfo[index][prop_ExtPos][1], gPropertyInfo[index][prop_ExtPos][2], gPropertyInfo[index][prop_ExtProp], gPropertyInfo[gPropertyInfo[index][prop_ExtProp]][prop_IntInt]);
+			}
+			if(gPropertyInfo[index][prop_Attrib] & PROPERTY_ATTRIB_EXITABLE)
+			{
+				gPropertyInfo[index][prop_AreaInt] = CreateDynamicSphere(gPropertyInfo[index][prop_IntPos][0], gPropertyInfo[index][prop_IntPos][1], gPropertyInfo[index][prop_IntPos][2], 2.0, index, gPropertyInfo[index][prop_IntInt]);
+				gPropertyInfo[index][prop_PickupInt] = CreateDynamicPickup(1318, 1, gPropertyInfo[index][prop_IntPos][0], gPropertyInfo[index][prop_IntPos][1], gPropertyInfo[index][prop_IntPos][2], index, gPropertyInfo[index][prop_IntInt]);
+			}
+		}
+	return 1;
+}
+
+//
+//
+//
+// FACTION SYSTEM
+//
+//
+enum {
+    MAX_FACTIONS = 25
+}
+enum FACTION_RANK_INFO
+{
+    fact_Rank1[32],
+    fact_Rank2[32],
+    fact_Rank3[32],
+    fact_Rank4[32],
+    fact_Rank5[32],
+    fact_Rank6[32],
+    fact_Rank7[32],
+    fact_Rank8[32],
+    fact_Rank9[32],
+    fact_Rank10[32]
+}
+enum FACTION_INFO
+{
+	fact_Name[32],
+	fact_Type,
+	Float:fact_Pos[3],
+    fact_Ranks[FACTION_RANK_INFO]
+}
+new gFactionInfo[MAX_FACTIONS][FACTION_INFO];
+
+forward Faction_LoadAll();
+	forward r@Faction_LoadAll();
+
+public Faction_LoadAll()
+	return mysql_function_query(g_dbConnection, "SELECT * FROM `faction_info`", true, "r@Faction_LoadAll", "");
+public r@Faction_LoadAll()
+{
+	new rows, fields;
+	cache_get_data(rows, fields, g_dbConnection);
+
+	new index = -1;
+	while(++index < rows)
+	{
+		new buffer[32], id;
+
+		cache_get_field_content(index, "id", buffer, g_dbConnection);
+		id = strval(buffer);
+
+		if((id + 1) >= MAX_FACTIONS)
+			continue;
+
+		cache_get_field_content(index, "name", gFactionInfo[id][fact_Name], g_dbConnection);
+		cache_get_field_content(index, "type", buffer, g_dbConnection);
+		gFactionInfo[id][fact_Type] = strval(buffer);
+
+		cache_get_field_content(index, "x", buffer, g_dbConnection);
+		gFactionInfo[id][fact_Pos][0] = floatstr(buffer);
+		cache_get_field_content(index, "y", buffer, g_dbConnection);
+		gFactionInfo[id][fact_Pos][1] = floatstr(buffer);
+		cache_get_field_content(index, "z", buffer, g_dbConnection);
+		gFactionInfo[id][fact_Pos][2] = floatstr(buffer);
+
+        cache_get_field_content(index, "rank1", gFactionInfo[id][fact_Ranks][fact_Rank1], g_dbConnection);
+        cache_get_field_content(index, "rank2", gFactionInfo[id][fact_Ranks][fact_Rank2], g_dbConnection);
+        cache_get_field_content(index, "rank3", gFactionInfo[id][fact_Ranks][fact_Rank3], g_dbConnection);
+        cache_get_field_content(index, "rank4", gFactionInfo[id][fact_Ranks][fact_Rank4], g_dbConnection);
+        cache_get_field_content(index, "rank5", gFactionInfo[id][fact_Ranks][fact_Rank5], g_dbConnection);
+        cache_get_field_content(index, "rank6", gFactionInfo[id][fact_Ranks][fact_Rank6], g_dbConnection);
+        cache_get_field_content(index, "rank7", gFactionInfo[id][fact_Ranks][fact_Rank7], g_dbConnection);
+        cache_get_field_content(index, "rank8", gFactionInfo[id][fact_Ranks][fact_Rank8], g_dbConnection);
+        cache_get_field_content(index, "rank9", gFactionInfo[id][fact_Ranks][fact_Rank9], g_dbConnection);
+        cache_get_field_content(index, "rank10", gFactionInfo[id][fact_Ranks][fact_Rank10], g_dbConnection);
+	}
+	return 1;
+}
+
+CMD:faction(playerid, params[])
+    cmd_faccao(playerid, params);
+CMD:faccao(playerid, params[])
+{
+    if(gPlayerInfo[playerid][gPlayerStat] < PLAYER_STAT_PLAYING)
+        return 1;
+    if(gPlayerInfo[playerid][gPlayerFamily] == 0)
+        return 1;
+
+    SendClientMessage(playerid, 0xC0C0C0AA, "Membros Conectados:");
+    new index = -1, buffer[64];
+    while(++index < MAX_PLAYERS)
+        if(gPlayerInfo[index][gPlayerStat] >= PLAYER_STAT_PLAYING)
+            if(gPlayerInfo[playerid][gPlayerFamily] == gPlayerInfo[index][gPlayerFamily])
+            {
+                //new realrank = gPlayerInfo[index][gPlayerFamilyRank] - 1;
+                format(buffer, sizeof buffer, "(ID: %d) {C0C0C0}%s %s.",
+                    index,
+                    gPlayerInfo[index][gPlayerName],
+                    GetPlayerRank(playerid)
+                );
+                SendClientMessage(playerid, 0x008000AA, buffer);
+            }
+    return 1;
+}
+
+CMD:f(playerid, params[])
+{
+    if(gPlayerInfo[playerid][gPlayerStat] < PLAYER_STAT_PLAYING)
+        return 1;
+    if(gPlayerInfo[playerid][gPlayerFamily] == 0)
+        return 1;
+    if(!params[0])
+    {
+        SendClientMessage(playerid, 0x00CAC5AA,
+            "FamilyCmd: {FFFFFF}/f(amilia) [texto] {C0C0C0}- Manda uma mensagem para a sua família."
+        );
+        return 1;
+    }
+
+    format(gstring, sizeof gstring,
+        "(( %s %s: {FFFFFF}%s {00CAC5} ))",
+        GetPlayerRank(playerid),
+        gPlayerInfo[playerid][gPlayerName],
+        params
+    );
+
+    new index = -1;
+    while(++index < MAX_PLAYERS)
+    {
+        if(gPlayerInfo[index][gPlayerFamily] == gPlayerInfo[playerid][gPlayerFamily])
+            SendClientMessage(playerid, 0x00CAC5FF, gstring);
+    }
+    return 1;
+}
+GetPlayerRank(playerid)
+{
+    new
+        rank[32] = "Civil",
+        pr       = gPlayerInfo[playerid][gPlayerFamilyRank];
+    if(!gPlayerInfo[playerid][gPlayerFamily])
+        return rank;
+    if(!(0 < pr < 16))
+        return rank;
+
+    pr -= 1;
+
+    format(rank, 32, "%s",
+        gFactionInfo[gPlayerInfo[playerid][gPlayerFamily]][fact_Ranks][FACTION_RANK_INFO:pr]);
+    return rank;
+}
+
+//
+//
+// Admin System
+//
+//
+forward r@Admin_Ban(playerid, targetid, days, reason[]);
+CMD:ban(playerid, params[])
+{
+    if(!Player_IsAdmin(playerid))
+        return 0;
+
+    new targetid,
+        reason[120],
+        days;
+
+    if(sscanf(params, "rs[120]I(-1)", targetid, reason, days))
+    {
+        SendClientMessage(playerid, 0xFF6F6FAA, "AdmCmd: {FFFFFF}/ban [playerid] [motivo] [dias (= -1)] -{C0C0C0} Bane um player.");
+        SendClientMessage(playerid, 0xC0C0C0FF, "          Para banir um jogador temporariamente, digite os dias. Para banir permanentemente, digite \"-1\" ou deixe em branco.");
+        return 1;
+    }
+
+    if(gPlayerInfo[playerid][gPlayerStat] < PLAYER_STAT_PLAYING)
+        return SendClientMessage(playerid, 0xFF6F6FAA, "AdmCmd: {FFFFFF}/ban {C0C0C0}- O player não está logado!");
+
+    if(Player_IsAdmin(targetid))
+    {
+        if(!(gPlayerInfo[playerid][gPlayerAttributes] & PLAYER_ATTRIB_LEAD_ADMIN))
+        {
+            SendClientMessage(playerid, 0xFF6F6FAA, "AdmCmd: {FFFFFF}/ban {C0C0C0}- Bans em admins só podem ser adicionados por Lead-Admins!");
+            return 1;
+        }
+    }
+
+    format(gstring, sizeof gstring,
+        "INSERT INTO `record_info` (`pid`,`type`,`stamp`,`reason`,`time`,`admin`) VALUES(%d,%d,UNIX_TIMESTAMP(),'%s',%d,%d)",
+        gPlayerInfo[targetid][gPlayerID], RECORD_TYPE_BAN, reason, days * 24 * 60 * 60, gPlayerInfo[playerid][gPlayerID]);
+    mysql_function_query(g_dbConnection, gstring, false, "r@Admin_Ban", "iiis", playerid, targetid, days, reason);
+    SendClientMessage(playerid, -1, "Processndo, aguarde...");
+    return 1;
+}
+public r@Admin_Ban(playerid, targetid, days, reason[])
+{
+    mysql_store_result(g_dbConnection); new id = mysql_insert_id(g_dbConnection); mysql_free_result(g_dbConnection);
+    if(days != -1)
+        format(gstring, sizeof gstring, "AdmCmd: %s foi banido por %s. Motivo: %s", gPlayerInfo[targetid][gPlayerName], gPlayerInfo[playerid][gPlayerName], reason);
+    else
+        format(gstring, sizeof gstring, "AdmCmd: %s foi banido temporariamente por %s. Motivo: %s", gPlayerInfo[targetid][gPlayerName], gPlayerInfo[playerid][gPlayerName], reason);
+    SendClientMessageToAll(0xFF6F6FAA, gstring);
+
+    format(gstring, sizeof gstring,
+        "Você adicionou com sucesso um ban a %s (PID:%d) - Para consultas futuras, a ID do ban é: {C0C0C0}%d.",
+        gPlayerInfo[playerid][gPlayerName], gPlayerInfo[playerid][gPlayerID], id);
+    SendClientMessage(playerid, -1, gstring);
+
+    Kick(targetid);
+
+    return 1;
+}
+
+
+
+
+//
+//
+// Local Functions
+//
+#define prquick%0(%1) forward%0(%1);public%0(%1)
+Property_DisplayData(playerid, propertyid)
+{
+	if(!gPropertyInfo[propertyid][prop_Loaded])
+		return SendClientMessage(playerid, -1, "{44436E}DEV_ERR: {FFFFFF}Propriedade não-carregada.");
+	
+	#define _prp gPropertyInfo[propertyid]
+	format(gstring, sizeof gstring, "PROPRIEDADE: %d [Nome: %s] | Dono: (PID)%d | Type: %d | Level: %d | Preço: %d",
+		propertyid, _prp[prop_Name], _prp[prop_Owner], _prp[prop_Type], _prp[prop_Level], _prp[prop_Price]);
+	SendClientMessage(playerid, 0x9F9DD1FF, gstring);
+	format(gstring, sizeof gstring, " -- ATRIBUTOS: Ativa: %d | Comprável: %d | Vendivel: %d | Entrável: %d | Saível: %d",
+		_prp[prop_Attrib]&PROPERTY_ATTRIB_ACTIVE,
+		_prp[prop_Attrib]&PROPERTY_ATTRIB_BUYABLE,
+		_prp[prop_Attrib]&PROPERTY_ATTRIB_SELLABLE,
+		_prp[prop_Attrib]&PROPERTY_ATTRIB_ENTERABLE, 
+		_prp[prop_Attrib]&PROPERTY_ATTRIB_EXITABLE);
+	SendClientMessage(playerid, 0x9F9DD1FF, gstring);
+	#undef _prp
+	return 1;
+}
+Property_SendDoorMessage(playerid, propertyid)
+{
+	if(gPropertyInfo[propertyid][prop_Attrib] & PROPERTY_ATTRIB_STATIC)
+	{
+		//Property_SendDoorMessage_s(playerid, propertyid, gFactionInfo[gPropertyInfo[propertyid][prop_Owner]][fact_Name]);
+	}
+	else
+	{
+		format(gstring, sizeof gstring, "SELECT `name` FROM `player_info` WHERE `id`=%d", gPlayerInfo[playerid][gPlayerID]);
+		mysql_function_query(g_dbConnection, gstring, true, "r@Property_SendDoorMessage", "ii", playerid, propertyid);
+	}
+	return 1;
+}
+
+prquick r@Property_SendDoorMessage(playerid, propertyid)
+{
+	new buff[32];
+	cache_get_field_content(0, "name", buff, g_dbConnection);
+	Property_SendDoorMessage_s(playerid, propertyid, buff);
+	return 1;
+}
+
+Property_SendDoorMessage_s(playerid, propertyid, owner[])
+{
+	format(gstring, sizeof gstring, "Bem-vindo {FFEA00}%s{FFFFFF} de {D6D6D6}%s{FFFFFF}", Property_GetTypeName(gPropertyInfo[propertyid][prop_Type]), owner);
+	SendClientMessage(playerid, -1, gstring);
+	SendClientMessage(playerid, -1, "     Digite {2DD2F7}/entrar{FFFFFF} ou pressione {2DD2F7}~k~~VEHICLE_ENTER_EXIT~{FFFFFF} para entrar.");
+	return 1;
+}
+
+Property_GetTypeName(propertytype)
+{
+	new buff[32];
+	switch(propertytype) {
+		case PROPERTY_TYPE_INT:
+			format(buff, sizeof buff, "ao lugar");
+		case PROPERTY_TYPE_HOUSE:
+			format(buff, sizeof buff, "à casa");
+		default:
+			format(buff, sizeof buff, "PREGUIÇA E FODA");
+	}
+	return buff;
+}
+
+//
+//
+//
+// Local Functions/Stocks
+//
+//
+
+//
+// Admins:
+Player_IsAdmin(playerid)
+{
+	if(gPlayerInfo[playerid][gPlayerStat] >= PLAYER_STAT_PLAYING)
+	{	
+		return (gPlayerInfo[playerid][gPlayerAttributes] & PLAYER_ATTRIB_ADMIM) || (gPlayerInfo[playerid][gPlayerAttributes] & PLAYER_ATTRIB_DEV) || (gPlayerInfo[playerid][gPlayerAttributes] & PLAYER_ATTRIB_LEAD_ADMIN) || (gPlayerInfo[playerid][gPlayerAttributes] & PLAYER_ATTRIB_SEMI_ADMIN);
+	}
+	return 0;
+}
+
+// Y_Less / // // // /
+SendClientMessageFormatted(playerid, color, fstring[], {Float, _}:...)
+{
+  new n = numargs() * 4;
+
+  if (n == 3 * 4)
+  {
+        return SendClientMessage(playerid, color, fstring);
+  }
+  else
+  {
+        new message[128];
+        new arg_start;
+        new arg_end;
+        new i = 0;
+
+        #emit CONST.pri  fstring
+        #emit ADD.C    0x4
+        #emit STOR.S.pri arg_start // first parameters's offset
+
+        #emit LOAD.S.pri n
+        #emit ADD.C    0x8
+        #emit STOR.S.pri arg_end  // last parameters's offset
+
+        // pushing variable arguments
+        for (i = arg_end; i >= arg_start; i -= 4)
+        {
+            #emit LCTRL    5
+            #emit LOAD.S.alt i
+            #emit ADD
+            #emit LOAD.I
+            #emit PUSH.pri
+        }
+        // pushing normal arguments
+        #emit PUSH.S  fstring // format string
+        #emit PUSH.C  128   // sizeof(message)
+        #emit PUSH.ADR message // the string which format() will write in
+        #emit PUSH.S  n    // number of arguments * 4, always must be passed for natives
+        #emit SYSREQ.C format
+
+        // clearing the stack
+        i = n / 4 + 1;
+        while (--i >= 0)
+        {
+            #emit STACK 0x4
+        }
+
+        return SendClientMessage(playerid, color, message);
+  }
+}
